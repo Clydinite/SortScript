@@ -1,0 +1,171 @@
+{
+  "name": "order-file-extension",
+  "displayName": "Order File Extension",
+  "description": "VS Code extension for .order files that provides file ordering, syntax highlighting, and autocompletion",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other",
+    "Language Packs"
+  ],
+  "keywords": [
+    "order",
+    "file organization",
+    "project structure",
+    "file sorting"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:order"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "orderFileViews",
+          "title": "Order Files",
+          "icon": "$(list-ordered)"
+        }
+      ]
+    },
+    "views": {
+      "orderFileViews": [
+        {
+          "id": "orderedFiles",
+          "name": "Ordered Files",
+          "icon": "$(list-ordered)",
+          "contextualTitle": "Ordered Files"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "orderedFiles.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "orderedFiles.validate",
+        "title": "Validate Order Files",
+        "icon": "$(check)"
+      },
+      {
+        "command": "orderedFiles.showGroups",
+        "title": "Show File Groups",
+        "icon": "$(group-by-ref-type)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "orderedFiles.refresh",
+          "when": "view == orderedFiles",
+          "group": "navigation"
+        },
+        {
+          "command": "orderedFiles.validate",
+          "when": "view == orderedFiles",
+          "group": "navigation"
+        },
+        {
+          "command": "orderedFiles.showGroups",
+          "when": "view == orderedFiles",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "orderedFiles.refresh",
+          "title": "Order Files: Refresh"
+        },
+        {
+          "command": "orderedFiles.validate",
+          "title": "Order Files: Validate"
+        },
+        {
+          "command": "orderedFiles.showGroups",
+          "title": "Order Files: Show Groups"
+        }
+      ]
+    },
+    "languages": [
+      {
+        "id": "order",
+        "aliases": [
+          "Order File",
+          "order"
+        ],
+        "extensions": [
+          ".order"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/order-light.svg",
+          "dark": "./icons/order-dark.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "order",
+        "scopeName": "source.order",
+        "path": "./syntaxes/order.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Order File Extension",
+      "properties": {
+        "orderFile.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh the ordered file view when .order files change"
+        },
+        "orderFile.showValidationErrors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show validation errors for .order files"
+        },
+        "orderFile.enableHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable hover documentation for directives"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "node esbuild.config.js",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.100.0",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.25.5",
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/order-file-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/order-file-extension/issues"
+  },
+  "homepage": "https://github.com/your-username/order-file-extension#readme",
+  "license": "MIT",
+  "dependencies": {
+    "chevrotain": "^11.0.3"
+  }
+}

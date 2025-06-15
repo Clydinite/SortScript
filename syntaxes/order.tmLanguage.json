@@ -1,0 +1,102 @@
+{
+    "scopeName": "source.order",
+    "patterns": [
+        {
+            "name": "comment.line.number-sign.order",
+            "match": "#.*$"
+        },
+        {
+            "name": "string.regexp.order",
+            "match": "\\/(?:[^\\/\\\\\\r\\n]|\\\\.)+\\/[gimuy]*"
+        },
+        {
+            "name": "variable.other.capture-group.order",
+            "match": "\\$[0-9]+|\\$[a-zA-Z_][a-zA-Z0-9_]*"
+        },
+        {
+            "name": "keyword.control.directive.order",
+            "match": "@(required|allowif|disallowif|tiebreaker|groupby|metadata|alphabetical|reverse_alphabetical|natural|extension|size|modified|created|enum|default)\\b"
+        },
+        {
+            "name": "keyword.control.directive.custom.order",
+            "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+        },
+        {
+            "name": "string.quoted.double.order",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.order",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        {
+            "name": "punctuation.section.group.begin.order",
+            "match": "[{(]"
+        },
+        {
+            "name": "punctuation.section.group.end.order",
+            "match": "[})]"
+        },
+        {
+            "name": "punctuation.separator.comma.order",
+            "match": ","
+        },
+        {
+            "name": "entity.name.filename.glob.order",
+            "match": "[a-zA-Z0-9_+*./\\-]+(?:\\*{1,2}|\\?|\\[[^\\]]*\\]|\\{[^}]*\\})"
+        },
+        {
+            "name": "entity.name.filename.order",
+            "match": "[a-zA-Z0-9_+./\\-]+"
+        }
+    ],
+    "repository": {
+        "directive-args": {
+            "patterns": [
+                {
+                    "include": "#string"
+                },
+                {
+                    "include": "#regex"
+                },
+                {
+                    "include": "#capture-group"
+                },
+                {
+                    "include": "#nested-directive"
+                }
+            ]
+        },
+        "string": {
+            "name": "string.quoted.double.order",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.order",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "regex": {
+            "name": "string.regexp.order",
+            "match": "\\/(?:[^\\/\\\\\\r\\n]|\\\\.)+\\/[gimuy]*"
+        },
+        "capture-group": {
+            "name": "variable.other.capture-group.order",
+            "match": "\\$[0-9]+|\\$[a-zA-Z_][a-zA-Z0-9_]*"
+        },
+        "nested-directive": {
+            "name": "keyword.control.directive.nested.order",
+            "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+        }
+    },
+    "fileTypes": [
+        "order"
+    ],
+    "uuid": "a82fe6b4-9000-437d-a88f-76b0f4f0c0f6"
+}
+
