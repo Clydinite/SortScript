@@ -171,6 +171,7 @@
   "homepage": "https://github.com/your-username/order-file-extension#readme",
   "license": "MIT",
   "dependencies": {
+    "@vitest/coverage-v8": "^3.2.4",
     "chevrotain": "^11.0.3",
     "globals": "^16.3.0"
   }

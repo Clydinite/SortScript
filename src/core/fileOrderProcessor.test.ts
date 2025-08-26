@@ -5,7 +5,7 @@ import { parseOrderFile } from './parser';
 
 // Mock implementations for Path and Fs interfaces
 const mockPath = {
-  join: (...paths: string[]) => paths.join('/'),
+  join: (...paths: string[]) => paths.filter(p => p).join('/'),
   relative: (from: string, to: string) => to.replace(from, ''),
   extname: (path: string) => {
     const lastDotIndex = path.lastIndexOf('.');
@@ -273,28 +273,81 @@ describe('FileOrderProcessor (Unit Tests)', () => {
 
     const sortedDir = processor.orderFiles(rootDir);
     const fileNames = sortedDir.children.map(item => item.name);
-    """    expect(fileNames).toEqual(['c.txt', 'a.txt', 'b.txt']); // Newest first
+    expect(fileNames).toEqual(['c.txt', 'a.txt', 'b.txt']); // Newest first
   });
 
-  it('should match glob patterns correctly', () => {
+  it('should group files by a named group block', () => {
     const orderFileContent = `
-      *.js @group_by(@basename)
+      @group("JS Files") {
+        a.js
+        b.js
+      }
     `;
     const orderFile = parseOrderFile(orderFileContent);
     const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
-    const file = new File('component.js', '/test/component.js');
-    const rule = (processor as any).findMatchingRule(file);
-    expect(rule).not.toBeNull();
-    expect(rule.groupBy).toBe('basename');
+
+    const rootDir = new Directory('root', '/test');
+    rootDir.children.push(new File('a.js', '/test/a.js'));
+    rootDir.children.push(new File('b.js', '/test/b.js'));
+    rootDir.children.push(new File('c.js', '/test/c.js'));
+
+    const sortedDir = processor.orderFiles(rootDir);
+    expect(sortedDir.children.length).toBe(2); // "JS Files" group and c.js
+    expect(sortedDir.children[0].name).toBe('JS Files');
+    expect((sortedDir.children[0] as Group).children.length).toBe(2);
+    expect(sortedDir.children[1].name).toBe('c.js');
   });
 
-  it('should return correct required files', () => {
+  it('should handle @root directive', () => {
     const orderFileContent = `
-      required.txt @required
+      @root {
+        @tiebreaker(@reverse_alphabetical)
+      }
     `;
     const orderFile = parseOrderFile(orderFileContent);
     const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
-    const requiredFiles = processor.getRequiredFiles();
-    expect(requiredFiles).toEqual(['required.txt']);
+
+    const rootDir = new Directory('root', '/test');
+    rootDir.children.push(new File('a.txt', '/test/a.txt'));
+    rootDir.children.push(new File('b.txt', '/test/b.txt'));
+
+    const sortedDir = processor.orderFiles(rootDir);
+    const fileNames = sortedDir.children.map(item => item.name);
+    expect(fileNames).toEqual(['b.txt', 'a.txt']);
   });
-});""
+
+  it('should allow files marked with @allow_if', () => {
+    const orderFileContent = `
+      *.js @allow_if(/component/)
+    `;
+    const orderFile = parseOrderFile(orderFileContent);
+    const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
+
+    const rootDir = new Directory('root', '/test');
+    rootDir.children.push(new File('component.js', '/test/component.js'));
+    rootDir.children.push(new File('another.js', '/test/another.js'));
+
+    const sortedDir = processor.orderFiles(rootDir);
+    const fileNames = sortedDir.children.map(item => item.name);
+    expect(fileNames).toEqual(['component.js']);
+  });
+
+  it('should group files by regex capture group', () => {
+    const orderFileContent = `
+      *.js @group_by(/^(.*)\.js$/)
+    `;
+    const orderFile = parseOrderFile(orderFileContent);
+    const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
+
+    const rootDir = new Directory('root', '/test');
+    rootDir.children.push(new File('feature-a.js', '/test/feature-a.js'));
+    rootDir.children.push(new File('feature-b.js', '/test/feature-b.js'));
+    rootDir.children.push(new File('util.js', '/test/util.js'));
+
+    const sortedDir = processor.orderFiles(rootDir);
+    expect(sortedDir.children.length).toBe(3); // feature-a, feature-b, util groups
+    expect(sortedDir.children[0].name).toBe('feature-a');
+    expect(sortedDir.children[1].name).toBe('feature-b');
+    expect(sortedDir.children[2].name).toBe('util');
+  });
+});

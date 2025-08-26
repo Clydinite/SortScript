@@ -75,11 +75,12 @@ export interface OrderFile {
 }
 
 export interface Statement {
-  type: 'pathBlock' | 'filePattern' | 'directive';
+  type: 'pathBlock' | 'filePattern' | 'directive' | 'groupBlock';
   pattern?: string;
   directives?: Directive[];
   block?: Statement[];
   directive?: Directive;
+  groupName?: string;
 }
 
 export interface Directive {
@@ -101,6 +102,7 @@ class OrderParser extends CstParser {
   directive: ParserMethod<[], CstNode>;
   directiveArg: ParserMethod<[], CstNode>;
   pattern: ParserMethod<[], CstNode>;
+  directiveBlock: ParserMethod<[], CstNode>;
 
   constructor() {
     super(allTokens);
@@ -114,6 +116,10 @@ class OrderParser extends CstParser {
         {
           GATE: this.BACKTRACK(this.pathBlock),
           ALT: () => this.SUBRULE(this.pathBlock),
+        },
+        {
+          GATE: this.BACKTRACK(this.directiveBlock),
+          ALT: () => this.SUBRULE(this.directiveBlock),
         },
         {
           GATE: this.BACKTRACK(this.filePattern),
@@ -130,6 +136,13 @@ class OrderParser extends CstParser {
       this.CONSUME(LCurly);
       this.MANY(() => this.SUBRULE(this.statement));
       this.CONSUME(RCurly);
+    });
+
+    this.directiveBlock = this.RULE('directiveBlock', () => {
+        this.SUBRULE(this.directive);
+        this.CONSUME(LCurly);
+        this.MANY(() => this.SUBRULE(this.statement));
+        this.CONSUME(RCurly);
     });
 
     this.filePattern = this.RULE('filePattern', () => {
@@ -200,6 +213,8 @@ export class OrderFileInterpreter {
         return this.visitDirectiveArg(cstNode);
       case 'pattern':
         return this.visitPattern(cstNode);
+      case 'directiveBlock':
+        return this.visitDirectiveBlock(cstNode);
       default:
         throw new Error(`Unknown CST node: ${cstNode.name}`);
     }
@@ -214,14 +229,16 @@ export class OrderFileInterpreter {
 
   visitStatement(cstNode: CstNode): Statement {
     if (cstNode.children.pathBlock) {
-      return this.visit(cstNode.children.pathBlock[0] as CstNode);
+      return this.visit(cstNode.children.pathBlock[0] as CstNode) as any;
     } else if (cstNode.children.filePattern) {
-      return this.visit(cstNode.children.filePattern[0] as CstNode);
+      return this.visit(cstNode.children.filePattern[0] as CstNode) as any;
     } else if (cstNode.children.directive) {
       return {
         type: 'directive',
-        directive: this.visit(cstNode.children.directive[0] as CstNode),
+        directive: this.visit(cstNode.children.directive[0] as CstNode) as any,
       };
+    } else if (cstNode.children.directiveBlock) {
+        return this.visit(cstNode.children.directiveBlock[0] as CstNode) as any;
     }
     throw new Error('Invalid statement');
   }
@@ -247,6 +264,34 @@ export class OrderFileInterpreter {
       type: 'filePattern',
       pattern,
       directives,
+    };
+  }
+
+  visitDirectiveBlock(cstNode: CstNode): Statement {
+    const directive = this.visit(cstNode.children.directive[0] as CstNode) as any;
+    const statements =
+      cstNode.children.statement?.map((stmt) => this.visit(stmt as CstNode) as any) ||
+      [];
+    
+    if (directive.name === 'group') {
+        return {
+            type: 'groupBlock',
+            groupName: directive.args[0] as string,
+            block: statements,
+        };
+    } else if (directive.name === 'root') {
+        return {
+            type: 'pathBlock',
+            pattern: '',
+            block: statements,
+        };
+    }
+
+    // for now, we just flatten the block if we don't recognize the directive
+    return {
+        type: 'pathBlock',
+        pattern: '',
+        block: statements,
     };
   }
 

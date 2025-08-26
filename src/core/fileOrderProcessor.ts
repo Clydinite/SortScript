@@ -42,6 +42,15 @@ export class FileOrderProcessor {
         if (statement.directive?.name === 'tiebreaker') {
             this.globalTiebreakers = this.parseTiebreakers(statement.directive.args || []);
         }
+      } else if (statement.type === 'groupBlock') {
+        const groupName = statement.groupName;
+        for (const stmt of statement.block) {
+            if (stmt.type === 'filePattern') {
+                const rule = this.createRule(stmt, basePath);
+                rule.groupName = groupName;
+                this.rules.push(rule);
+            }
+        }
       }
     }
   }
@@ -69,7 +78,11 @@ export class FileOrderProcessor {
           if (directive.args && directive.args[0]) {
             const arg = directive.args[0];
             if (typeof arg === 'string') {
-              rule.groupBy = arg.startsWith('@') ? arg.substring(1) : arg;
+              if (arg.startsWith('/') && arg.endsWith('/')) {
+                rule.groupBy = new RegExp(arg.slice(1, -1));
+              } else {
+                rule.groupBy = arg.startsWith('@') ? arg.substring(1) : arg;
+              }
             } else if (typeof arg === 'object' && 'name' in arg) {
               rule.groupBy = (arg as Directive).name;
             }
@@ -77,6 +90,14 @@ export class FileOrderProcessor {
           break;
         case 'hidden':
           rule.isHidden = true;
+          break;
+        case 'allow_if':
+          if (directive.args && directive.args[0]) {
+            const arg = directive.args[0] as string;
+            if (arg.startsWith('/') && arg.endsWith('/')) {
+              rule.allowIf = new RegExp(arg.slice(1, -1));
+            }
+          }
           break;
       }
     }
@@ -117,6 +138,9 @@ export class FileOrderProcessor {
       const rule = this.findMatchingRule(file);
 
       if (rule) {
+        if (rule.allowIf && !rule.allowIf.test(file.name)) {
+            continue;
+        }
         if (rule.isHidden) {
           continue;
         }
@@ -140,7 +164,9 @@ export class FileOrderProcessor {
       }
     }
 
-    for (const [groupKey, group] of groups) {
+    const sortedGroupKeys = Array.from(groups.keys()).sort();
+    for (const groupKey of sortedGroupKeys) {
+      const group = groups.get(groupKey)!;
       const orderedGroup = this.orderFileGroup(group.children);
       result.children.push(new Group(groupKey, orderedGroup));
     }
@@ -155,9 +181,7 @@ export class FileOrderProcessor {
 
     for (const rule of this.rules) {
       if (typeof rule.pattern === 'string') {
-        const pattern = rule.pattern;
-        const target = pattern.includes('/') ? filePath : file.name;
-        if (minimatch(target, pattern)) {
+        if (minimatch(filePath, rule.pattern, { matchBase: true })) {
           return rule;
         }
       } else if (rule.pattern instanceof RegExp) {
@@ -170,17 +194,26 @@ export class FileOrderProcessor {
     return null;
   }
 
-  private getGroupKey(file: File, groupBy: string): string {
-    if (groupBy === 'basename') {
-        let basename = file.name;
-        let ext = this.path.extname(basename);
-        while(ext) {
-            basename = this.path.basename(basename, ext);
-            ext = this.path.extname(basename);
+  private getGroupKey(file: File, groupBy: string | RegExp): string {
+    if (typeof groupBy === 'string') {
+        if (groupBy === 'basename') {
+            let basename = file.name;
+            let ext = this.path.extname(basename);
+            while(ext) {
+                basename = this.path.basename(basename, ext);
+                ext = this.path.extname(basename);
+            }
+            return basename;
         }
-        return basename;
+        return groupBy;
+    } else if (groupBy instanceof RegExp) {
+        const match = file.name.match(groupBy);
+        if (match && match[1]) {
+            return match[1];
+        }
+        return ''; // Default group for non-matching files
     }
-    return groupBy;
+    return '';
   }
 
   private orderFileGroup(files: FileSystemItem[]): FileSystemItem[] {
@@ -295,11 +328,11 @@ export class FileOrderProcessor {
   }
 
   public validateRequiredFiles(directory: Directory): string[] {
-    const requiredPatterns = this.getRequiredFiles();
+    const requiredFiles = this.getRequiredFiles();
     const existingFiles = directory.children.map(f => f.name);
     
-    return requiredPatterns.filter(pattern => {
-      return !existingFiles.some(existingFile => minimatch(existingFile, pattern));
+    return requiredFiles.filter(requiredPattern => {
+        return !existingFiles.some(existingFile => minimatch(existingFile, requiredPattern, { matchBase: true }));
     });
   }
 }
@@ -309,7 +342,8 @@ export interface OrderRule {
   directives: Directive[];
   isRequired?: boolean;
   tiebreakers?: string[];
-  groupBy?: string;
+  groupBy?: string | RegExp;
   groupName?: string;
   isHidden?: boolean;
+  allowIf?: RegExp;
 }
