@@ -5,46 +5,46 @@ import {
   ParserMethod,
   CstNode,
   IToken,
-} from "chevrotain";
+} from 'chevrotain';
 
 // Token definitions
 const Identifier = createToken({
-  name: "Identifier",
+  name: 'Identifier',
   pattern: /[a-zA-Z0-9_\+\*\.\-\/]+/,
 });
 
 const RegexLiteral = createToken({
-  name: "RegexLiteral",
+  name: 'RegexLiteral',
   pattern: /\/(?:[^\/\\\r\n]|\\.)+\/[gimuy]*/,
 });
 
 const StringLiteral = createToken({
-  name: "StringLiteral",
+  name: 'StringLiteral',
   pattern: /"(?:[^"\\]|\\.)*"/,
 });
 
 const CaptureGroupRef = createToken({
-  name: "CaptureGroupRef",
+  name: 'CaptureGroupRef',
   pattern: /\$[0-9]+|\$[a-zA-Z_][a-zA-Z0-9_]*/,
 });
 
-const LCurly = createToken({ name: "LCurly", pattern: /{/ });
-const RCurly = createToken({ name: "RCurly", pattern: /}/ });
-const LBracket = createToken({ name: "LBracket", pattern: /\[/ });
-const RBracket = createToken({ name: "RBracket", pattern: /\]/ });
-const LParen = createToken({ name: "LParen", pattern: /\(/ });
-const RParen = createToken({ name: "RParen", pattern: /\)/ });
-const At = createToken({ name: "At", pattern: /@/ });
-const Comma = createToken({ name: "Comma", pattern: /,/ });
+const LCurly = createToken({ name: 'LCurly', pattern: /{/ });
+const RCurly = createToken({ name: 'RCurly', pattern: /}/ });
+const LBracket = createToken({ name: 'LBracket', pattern: /\[/ });
+const RBracket = createToken({ name: 'RBracket', pattern: /\]/ });
+const LParen = createToken({ name: 'LParen', pattern: /\(/ });
+const RParen = createToken({ name: 'RParen', pattern: /\)/ });
+const At = createToken({ name: 'At', pattern: /@/ });
+const Comma = createToken({ name: 'Comma', pattern: /,/ });
 
 const Comment = createToken({
-  name: "Comment",
+  name: 'Comment',
   pattern: /#.*/,
   group: Lexer.SKIPPED,
 });
 
 const WhiteSpace = createToken({
-  name: "WhiteSpace",
+  name: 'WhiteSpace',
   pattern: /\s+/,
   group: Lexer.SKIPPED,
 });
@@ -75,7 +75,7 @@ export interface OrderFile {
 }
 
 export interface Statement {
-  type: "pathBlock" | "filePattern" | "directive";
+  type: 'pathBlock' | 'filePattern' | 'directive';
   pattern?: string;
   directives?: Directive[];
   block?: Statement[];
@@ -84,11 +84,11 @@ export interface Statement {
 
 export interface Directive {
   name: string;
-  args?: (string | CaptureGroupRef)[];
+  args?: (string | CaptureGroupRef | Directive)[];
 }
 
 export interface CaptureGroupRef {
-  type: "captureGroup";
+  type: 'captureGroup';
   ref: string;
 }
 
@@ -98,7 +98,6 @@ class OrderParser extends CstParser {
   statement: ParserMethod<[], CstNode>;
   pathBlock: ParserMethod<[], CstNode>;
   filePattern: ParserMethod<[], CstNode>;
-  array: ParserMethod<[], CstNode>;
   directive: ParserMethod<[], CstNode>;
   directiveArg: ParserMethod<[], CstNode>;
   pattern: ParserMethod<[], CstNode>;
@@ -106,11 +105,11 @@ class OrderParser extends CstParser {
   constructor() {
     super(allTokens);
 
-    this.orderFile = this.RULE("orderFile", () => {
+    this.orderFile = this.RULE('orderFile', () => {
       this.MANY(() => this.SUBRULE(this.statement));
     });
 
-    this.statement = this.RULE("statement", () => {
+    this.statement = this.RULE('statement', () => {
       this.OR([
         {
           GATE: this.BACKTRACK(this.pathBlock),
@@ -126,14 +125,14 @@ class OrderParser extends CstParser {
       ]);
     });
 
-    this.pathBlock = this.RULE("pathBlock", () => {
+    this.pathBlock = this.RULE('pathBlock', () => {
       this.SUBRULE(this.pattern);
       this.CONSUME(LCurly);
       this.MANY(() => this.SUBRULE(this.statement));
       this.CONSUME(RCurly);
     });
 
-    this.filePattern = this.RULE("filePattern", () => {
+    this.filePattern = this.RULE('filePattern', () => {
       this.SUBRULE(this.pattern);
       this.MANY(() => this.SUBRULE(this.directive));
       this.OPTION(() => {
@@ -143,13 +142,7 @@ class OrderParser extends CstParser {
       });
     });
 
-    this.array = this.RULE("array", () => {
-      this.CONSUME(LBracket);
-      this.MANY(() => this.SUBRULE(this.statement));
-      this.CONSUME(RBracket);
-    });
-
-    this.directive = this.RULE("directive", () => {
+    this.directive = this.RULE('directive', () => {
       this.CONSUME(At);
       this.CONSUME(Identifier);
       this.OPTION(() => {
@@ -165,7 +158,7 @@ class OrderParser extends CstParser {
       });
     });
 
-    this.directiveArg = this.RULE("directiveArg", () => {
+    this.directiveArg = this.RULE('directiveArg', () => {
       this.OR([
         { ALT: () => this.CONSUME(StringLiteral) },
         { ALT: () => this.CONSUME(RegexLiteral) },
@@ -175,7 +168,7 @@ class OrderParser extends CstParser {
       ]);
     });
 
-    this.pattern = this.RULE("pattern", () => {
+    this.pattern = this.RULE('pattern', () => {
       this.OR([
         { ALT: () => this.CONSUME(RegexLiteral) },
         { ALT: () => this.CONSUME(Identifier) },
@@ -190,21 +183,22 @@ export const orderParser = new OrderParser();
 
 // CST to AST converter
 export class OrderFileInterpreter {
-  visit(cstNode: CstNode, param?: any): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  visit(cstNode: CstNode): any {
     switch (cstNode.name) {
-      case "orderFile":
+      case 'orderFile':
         return this.visitOrderFile(cstNode);
-      case "statement":
+      case 'statement':
         return this.visitStatement(cstNode);
-      case "pathBlock":
+      case 'pathBlock':
         return this.visitPathBlock(cstNode);
-      case "filePattern":
+      case 'filePattern':
         return this.visitFilePattern(cstNode);
-      case "directive":
+      case 'directive':
         return this.visitDirective(cstNode);
-      case "directiveArg":
+      case 'directiveArg':
         return this.visitDirectiveArg(cstNode);
-      case "pattern":
+      case 'pattern':
         return this.visitPattern(cstNode);
       default:
         throw new Error(`Unknown CST node: ${cstNode.name}`);
@@ -225,11 +219,11 @@ export class OrderFileInterpreter {
       return this.visit(cstNode.children.filePattern[0] as CstNode);
     } else if (cstNode.children.directive) {
       return {
-        type: "directive",
+        type: 'directive',
         directive: this.visit(cstNode.children.directive[0] as CstNode),
       };
     }
-    throw new Error("Invalid statement");
+    throw new Error('Invalid statement');
   }
 
   visitPathBlock(cstNode: CstNode): Statement {
@@ -238,7 +232,7 @@ export class OrderFileInterpreter {
       cstNode.children.statement?.map((stmt) => this.visit(stmt as CstNode)) ||
       [];
     return {
-      type: "pathBlock",
+      type: 'pathBlock',
       pattern,
       block: statements,
     };
@@ -250,7 +244,7 @@ export class OrderFileInterpreter {
       cstNode.children.directive?.map((dir) => this.visit(dir as CstNode)) ||
       [];
     return {
-      type: "filePattern",
+      type: 'filePattern',
       pattern,
       directives,
     };
@@ -265,7 +259,7 @@ export class OrderFileInterpreter {
     return { name, args };
   }
 
-  visitDirectiveArg(cstNode: CstNode): any {
+  visitDirectiveArg(cstNode: CstNode): string | CaptureGroupRef | Directive {
     if (cstNode.children.StringLiteral) {
       const token = cstNode.children.StringLiteral[0] as IToken;
       return token.image.slice(1, -1); // Remove quotes
@@ -274,14 +268,14 @@ export class OrderFileInterpreter {
       return token.image;
     } else if (cstNode.children.CaptureGroupRef) {
       const token = cstNode.children.CaptureGroupRef[0] as IToken;
-      return { type: "captureGroup", ref: token.image };
+      return { type: 'captureGroup', ref: token.image };
     } else if (cstNode.children.Identifier) {
       const token = cstNode.children.Identifier[0] as IToken;
       return token.image;
     } else if (cstNode.children.directive) {
       return this.visit(cstNode.children.directive[0] as CstNode);
     }
-    throw new Error("Invalid directive argument");
+    throw new Error('Invalid directive argument');
   }
 
   visitPattern(cstNode: CstNode): string {
@@ -292,7 +286,7 @@ export class OrderFileInterpreter {
       const token = cstNode.children.Identifier[0] as IToken;
       return token.image;
     }
-    throw new Error("Invalid pattern");
+    throw new Error('Invalid pattern');
   }
 }
 
@@ -303,7 +297,7 @@ export function parseOrderFile(text: string): OrderFile | null {
   const lexResult = OrderLexer.tokenize(text);
 
   if (lexResult.errors.length > 0) {
-    console.error("Lexing errors:", lexResult.errors);
+    console.error('Lexing errors:', lexResult.errors);
     return null;
   }
 
@@ -311,14 +305,14 @@ export function parseOrderFile(text: string): OrderFile | null {
   const cst = orderParser.orderFile();
 
   if (orderParser.errors.length > 0) {
-    console.error("Parsing errors:", orderParser.errors);
+    console.error('Parsing errors:', orderParser.errors);
     return null;
   }
 
   try {
     return interpreter.visit(cst);
   } catch (error) {
-    console.error("AST conversion error:", error);
+    console.error('AST conversion error:', error);
     return null;
   }
 }

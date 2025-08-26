@@ -1,8 +1,10 @@
-require("esbuild").build({
-  entryPoints: ["src/extension.ts"],
+const esbuild = require('esbuild');
+
+esbuild.build({
+  entryPoints: ['src/extension.ts'],
   bundle: true,
-  platform: "node",
-  target: "node16", // or whatever matches VS Code
-  outfile: "out/extension.js",
-  external: ["vscode"], // don't bundle VS Code API
-});
+  outfile: 'out/extension.js',
+  platform: 'node',
+  target: 'node16',
+  external: ['vscode'],
+}).catch(() => process.exit(1));
