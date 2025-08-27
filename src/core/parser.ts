@@ -81,6 +81,7 @@ export interface Statement {
   block?: Statement[];
   directive?: Directive;
   groupName?: string;
+  blockDirectives?: Directive[]; // Added for pathBlock
 }
 
 export interface Directive {
@@ -133,8 +134,11 @@ class OrderParser extends CstParser {
 
     this.pathBlock = this.RULE('pathBlock', () => {
       this.SUBRULE(this.pattern);
+      this.OPTION(() => {
+        this.MANY1(() => this.SUBRULE(this.directive));
+      });
       this.CONSUME(LCurly);
-      this.MANY(() => this.SUBRULE(this.statement));
+      this.MANY2(() => this.SUBRULE(this.statement));
       this.CONSUME(RCurly);
     });
 
@@ -245,13 +249,17 @@ export class OrderFileInterpreter {
 
   visitPathBlock(cstNode: CstNode): Statement {
     const pattern = this.visit(cstNode.children.pattern[0] as CstNode);
+    const blockDirectives =
+      cstNode.children.directive?.map((dir) => this.visit(dir as CstNode) as any) ||
+      [];
     const statements =
-      cstNode.children.statement?.map((stmt) => this.visit(stmt as CstNode)) ||
+      cstNode.children.statement?.map((stmt) => this.visit(stmt as CstNode) as any) ||
       [];
     return {
       type: 'pathBlock',
       pattern,
       block: statements,
+      blockDirectives,
     };
   }
 

@@ -142,7 +142,8 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts --fix",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:debug": "vitest run --debug"
   },
   "devDependencies": {
     "@types/minimatch": "^5.1.2",

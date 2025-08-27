@@ -9,11 +9,8 @@ module.exports = [
     files: ["src/**/*.ts"],
     languageOptions: {
       globals: globals.node,
-    },
-    rules: {
-      "semi": ["error", "always"],
-      "quotes": ["error", "single"],
-    },
+    }
   },
   ...tseslint.configs.recommended,
 ];
+

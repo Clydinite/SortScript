@@ -1,6 +1,6 @@
-import { minimatch } from 'minimatch';
-import { OrderFile, Statement, Directive, CaptureGroupRef } from './parser';
-import { FileSystemItem, File, Directory, Group } from './structure';
+import { minimatch } from "minimatch";
+import { OrderFile, Statement, Directive, CaptureGroupRef } from "./parser";
+import { FileSystemItem, File, Directory, Group, FileState } from "./structure";
 
 interface Path {
   join(...paths: string[]): string;
@@ -10,107 +10,334 @@ interface Path {
 }
 
 interface Fs {
-  statSync(path: string): { isDirectory(): boolean; size: number; mtimeMs: number; birthtimeMs: number; };
+  statSync(path: string): {
+    isDirectory(): boolean;
+    size: number;
+    mtimeMs: number;
+    birthtimeMs: number;
+  };
+}
+
+interface Rule {
+  pattern: string | RegExp;
+  directives: Directive[];
+  isRequired?: boolean;
+  tiebreakers?: string[];
+  groupName?: string;
+  groupBy?: string | RegExp;
+  isHidden?: boolean;
+  allowIf?: RegExp;
+  disallowIf?: RegExp;
+}
+
+interface ProcessStatementsResult {
+  rules: Rule[];
+  tiebreakers: string[];
+  explicitOrder: string[];
 }
 
 export class FileOrderProcessor {
-  private rules: OrderRule[] = [];
-  private explicitOrder: string[] = [];
-  private globalTiebreakers: string[] = ['alphabetical'];
+  constructor(
+    private orderFile: OrderFile,
+    private path: Path,
+    private fs: Fs
+  ) {}
 
-  constructor(private orderFile: OrderFile, private path: Path, private fs: Fs) {
-    this.processOrderFile();
+  public orderFiles(directory: Directory): Directory {
+    const result = this.processDirectory(directory, this.orderFile.statements);
+    return result;
   }
 
-  private processOrderFile() {
-    this.processStatements(this.orderFile.statements);
+  private processDirectory(directory: Directory, statements: Statement[], basePath: string = ''): Directory {
+    const result = new Directory(directory.name, []);
+    let children = [...directory.children];
+
+    const { rules, tiebreakers, explicitOrder } = this.processStatements(statements, basePath);
+
+    const groupBlocks = statements.filter(s => s.type === 'groupBlock');
+    const groups: Group[] = [];
+    for (const block of groupBlocks) {
+        const group = new Group(block.groupName || '', []);
+        const groupFilePatterns = (block.block || []).map(st => st.pattern || '');
+        for (const pattern of groupFilePatterns) {
+            const fileIndex = children.findIndex(f => f.name === pattern);
+            if (fileIndex > -1) {
+                group.children.push(children[fileIndex]);
+                children.splice(fileIndex, 1);
+            }
+        }
+        if (group.children.length > 0) {
+            groups.push(group);
+        }
+    }
+
+    result.children.push(...groups);
+
+    const explicitlyOrderedItems: FileSystemItem[] = [];
+    const remainingItems: FileSystemItem[] = [];
+    const processedItems = new Set<FileSystemItem>();
+
+    // Handle explicit order first
+    for (const pattern of explicitOrder) {
+      for (const item of children) {
+        if (!processedItems.has(item) && minimatch(item.name, pattern, { matchBase: true })) {
+          explicitlyOrderedItems.push(item);
+          processedItems.add(item);
+        }
+      }
+    }
+
+    // Separate remaining items
+    for (const item of children) {
+      if (!processedItems.has(item)) {
+        remainingItems.push(item);
+      }
+    }
+
+    // Apply rules (grouping, hiding, etc.) to the remaining items
+    const { orderedChildren: ruleOrderedItems, remainingChildren: finalRemainingItems } = this.applyRulesToChildren(
+      remainingItems,
+      rules,
+      tiebreakers
+    );
+
+    // Process subdirectories recursively
+    const processedSubdirectories = new Set<FileSystemItem>();
+    const finalChildren = [...explicitlyOrderedItems, ...ruleOrderedItems, ...finalRemainingItems];
+    for (const item of finalChildren) {
+      if (item instanceof Directory) {
+        const pathBlock = this.findMatchingPathBlock(item.name, statements);
+        if (pathBlock) {
+          const subDirectoryStatements = pathBlock.block || [];
+          const sortedSubDirectory = this.processDirectory(item, subDirectoryStatements, this.path.join(basePath, item.name));
+          result.children.push(sortedSubDirectory);
+          processedSubdirectories.add(item);
+        } 
+      }
+    }
+
+    // Add all non-directory items and non-processed directories
+    for(const item of finalChildren) {
+        if (!(item instanceof Directory)) {
+            result.children.push(item);
+        } else if (!processedSubdirectories.has(item)) {
+            result.children.push(this.processDirectory(item, [], this.path.join(basePath, item.name)));
+        }
+    }
+    
+    // Final sort of the directory content
+    result.children = this.applyTiebreakers(result.children, tiebreakers);
+
+    // Re-apply explicit order at the end to ensure it is respected
+    const finalExplicitlyOrdered: FileSystemItem[] = [];
+    const finalRemaining: FileSystemItem[] = [...result.children];
+    const finalProcessed = new Set<FileSystemItem>();
+
+    for (const pattern of explicitOrder) {
+        let foundIndex = -1;
+        for (let i = 0; i < finalRemaining.length; i++) {
+            const item = finalRemaining[i];
+            if (!finalProcessed.has(item) && minimatch(item.name, pattern, { matchBase: true })) {
+                finalExplicitlyOrdered.push(item);
+                finalProcessed.add(item);
+                foundIndex = i;
+                break; 
+            }
+        }
+        if (foundIndex > -1) {
+            finalRemaining.splice(foundIndex, 1);
+        }
+    }
+
+    result.children = [...finalExplicitlyOrdered, ...finalRemaining];
+
+    return result;
   }
 
-  private processStatements(statements: Statement[], basePath: string = '') {
+  private findMatchingPathBlock(itemName: string, statements: Statement[]): Statement | undefined {
     for (const statement of statements) {
-      if (statement.type === 'pathBlock') {
-        const newBasePath = this.path.join(basePath, statement.pattern || '');
-        this.processStatements(statement.block || [], newBasePath);
-      } else if (statement.type === 'filePattern') {
-        const rule = this.createRule(statement, basePath);
-        this.rules.push(rule);
-        
-        if (statement.pattern && !this.isGlobPattern(statement.pattern)) {
-          this.explicitOrder.push(statement.pattern);
-        }
-      } else if (statement.type === 'directive') {
-        if (statement.directive?.name === 'tiebreaker') {
-            this.globalTiebreakers = this.parseTiebreakers(statement.directive.args || []);
-        }
-      } else if (statement.type === 'groupBlock') {
-        const groupName = statement.groupName;
-        for (const stmt of statement.block) {
-            if (stmt.type === 'filePattern') {
-                const rule = this.createRule(stmt, basePath);
-                rule.groupName = groupName;
-                this.rules.push(rule);
-            }
-        }
+      if (statement.type === 'pathBlock' && minimatch(itemName, statement.pattern || '', { matchBase: true })) {
+        return statement;
       }
     }
+    return undefined;
   }
 
-  private createRule(statement: Statement, basePath: string): OrderRule {
-    const rule: OrderRule = {
-      pattern: this.createPattern(statement.pattern || '', basePath),
-      directives: statement.directives || []
-    };
+  private processStatements(statements: Statement[], basePath: string): ProcessStatementsResult {
+    const rules: Rule[] = [];
+    let tiebreakers: string[] = [];
+    const explicitOrder: string[] = [];
 
-    for (const directive of statement.directives || []) {
-      switch (directive.name) {
-        case 'required':
-          rule.isRequired = true;
-          break;
-        case 'tiebreaker':
-          rule.tiebreakers = this.parseTiebreakers(directive.args || []);
-          break;
-        case 'group':
-          if (directive.args && directive.args[0]) {
-            rule.groupName = directive.args[0] as string;
-          }
-          break;
-        case 'group_by':
-          if (directive.args && directive.args[0]) {
-            const arg = directive.args[0];
-            if (typeof arg === 'string') {
-              if (arg.startsWith('/') && arg.endsWith('/')) {
-                rule.groupBy = new RegExp(arg.slice(1, -1));
-              } else {
-                rule.groupBy = arg.startsWith('@') ? arg.substring(1) : arg;
+    for (const statement of statements) {
+        if (statement.type === 'filePattern') {
+            if (!this.isGlobPattern(statement.pattern || '') && !statement.directives?.length) {
+                explicitOrder.push(statement.pattern || '');
+            }
+            const rule: any = {
+              pattern: this.createPattern(statement.pattern || '', basePath),
+              directives: statement.directives || []
+            };
+            for (const directive of statement.directives || []) {
+              switch (directive.name) {
+                case 'required':
+                  rule.isRequired = true;
+                  break;
+                case 'tiebreaker':
+                  rule.tiebreakers = this.parseTiebreakers(directive.args || []);
+                  break;
+                case 'group':
+                  if (directive.args && directive.args[0]) {
+                    rule.groupName = directive.args[0] as string;
+                  }
+                  break;
+                case 'group_by':
+                  if (directive.args && directive.args[0]) {
+                    const arg = directive.args[0];
+                    if (typeof arg === 'string') {
+                      if (arg.startsWith('/') && arg.endsWith('/')) {
+                        rule.groupBy = new RegExp(arg.slice(1, -1));
+                      } else {
+                        rule.groupBy = arg.startsWith('@') ? arg.substring(1) : arg;
+                      }
+                    } else if (typeof arg === 'object' && 'name' in arg) {
+                      rule.groupBy = (arg as Directive).name;
+                    }
+                  }
+                  break;
+                case 'hidden':
+                  rule.isHidden = true;
+                  break;
+                case 'allow_if':
+                  if (directive.args && directive.args[0]) {
+                    const arg = directive.args[0] as string;
+                    if (arg.startsWith('/') && arg.endsWith('/')) {
+                      rule.allowIf = new RegExp(arg.slice(1, -1));
+                    }
+                  }
+                  break;
+                case 'disallow_if':
+                  if (directive.args && directive.args[0]) {
+                    const arg = directive.args[0] as string;
+                    if (arg.startsWith('/') && arg.endsWith('/')) {
+                      rule.disallowIf = new RegExp(arg.slice(1, -1));
+                    }
+                  }
+                  break;
               }
-            } else if (typeof arg === 'object' && 'name' in arg) {
-              rule.groupBy = (arg as Directive).name;
             }
-          }
-          break;
-        case 'hidden':
-          rule.isHidden = true;
-          break;
-        case 'allow_if':
-          if (directive.args && directive.args[0]) {
-            const arg = directive.args[0] as string;
-            if (arg.startsWith('/') && arg.endsWith('/')) {
-              rule.allowIf = new RegExp(arg.slice(1, -1));
+            rules.push(rule);
+        } else if (statement.type === 'directive') {
+            if (statement.directive?.name === 'tiebreaker') {
+                tiebreakers = this.parseTiebreakers(statement.directive.args || []);
             }
-          }
-          break;
-      }
+        } else if (statement.type === 'pathBlock') {
+            if (statement.pattern === '') { // @root block
+                const rootBlockScope = this.processStatements(statement.block || [], basePath);
+                tiebreakers.push(...rootBlockScope.tiebreakers);
+                rules.push(...rootBlockScope.rules);
+                explicitOrder.push(...rootBlockScope.explicitOrder);
+            } else {
+                // For path blocks, rules are handled when processing the directory
+            }
+        } else if (statement.type === 'groupBlock') {
+            const group = new Group(statement.groupName || '');
+            const groupScope = this.processStatements(statement.block || [], '');
+            const rule: Rule = {
+                pattern: '', 
+                directives: [],
+                groupName: statement.groupName,
+                tiebreakers: groupScope.tiebreakers,
+            };
+            rules.push(rule);
+        }
     }
 
-    return rule;
+    if (tiebreakers.length === 0) {
+        tiebreakers.push('alphabetical');
+    }
+
+    return { rules, tiebreakers, explicitOrder };
+  }
+
+  private applyRulesToChildren(
+    children: FileSystemItem[],
+    rules: Rule[],
+    incomingTiebreakers: string[]
+  ): { orderedChildren: FileSystemItem[], remainingChildren: FileSystemItem[] } {
+    let orderedChildren: FileSystemItem[] = [];
+    let remainingChildren: FileSystemItem[] = [...children];
+    const groups: Map<string, Group> = new Map();
+    const processedItems = new Set<FileSystemItem>();
+
+    for (const rule of rules) {
+        const matchedFiles = remainingChildren.filter(item => {
+            if (processedItems.has(item)) return false;
+            const filePath = item instanceof File ? this.path.relative('/', item.path) : item.name;
+            if (typeof rule.pattern === 'string') {
+                return minimatch(filePath, rule.pattern, { matchBase: true });
+            } else if (rule.pattern instanceof RegExp) {
+                return rule.pattern.test(filePath);
+            }
+            return false;
+        });
+
+        for (const file of matchedFiles) {
+            if (rule.isHidden) {
+                processedItems.add(file);
+                continue;
+            }
+
+            if (rule.disallowIf && rule.disallowIf.test(file.name)) {
+                (file as File).state = FileState.Disallowed;
+            } else if (rule.allowIf) {
+                (file as File).state = rule.allowIf.test(file.name) ? FileState.Normal : FileState.Disallowed;
+            } else {
+                (file as File).state = FileState.Normal;
+            }
+
+            if (rule.groupName) {
+                if (!groups.has(rule.groupName)) {
+                    groups.set(rule.groupName, new Group(rule.groupName));
+                }
+                groups.get(rule.groupName)!.children.push(file);
+                processedItems.add(file);
+            } else if (rule.groupBy) {
+                const groupKey = this.getGroupKey(file as File, rule.groupBy);
+                if (groupKey) {
+                    if (!groups.has(groupKey)) {
+                        groups.set(groupKey, new Group(groupKey));
+                    }
+                    groups.get(groupKey)!.children.push(file);
+                    processedItems.add(file);
+                }
+            } else {
+                orderedChildren.push(file);
+                processedItems.add(file);
+            }
+        }
+    }
+
+    remainingChildren = remainingChildren.filter(item => !processedItems.has(item));
+
+    const groupItems: FileSystemItem[] = [];
+    const sortedGroupKeys = Array.from(groups.keys()).sort();
+    for (const key of sortedGroupKeys) {
+        const group = groups.get(key)!;
+        group.children = this.applyTiebreakers(group.children, incomingTiebreakers);
+        groupItems.push(group);
+    }
+
+    orderedChildren.push(...groupItems);
+    orderedChildren = this.applyTiebreakers(orderedChildren, incomingTiebreakers);
+    
+    return { orderedChildren, remainingChildren };
   }
 
   private createPattern(pattern: string, basePath: string): string | RegExp {
     if (pattern.startsWith('/') && pattern.endsWith('/')) {
       return new RegExp(pattern.slice(1, -1));
-    } else {
-      return this.path.join(basePath, pattern);
     }
+    return this.path.join(basePath, pattern);
   }
 
   private parseTiebreakers(args: (string | Directive | CaptureGroupRef)[]): string[] {
@@ -127,71 +354,6 @@ export class FileOrderProcessor {
 
   private isGlobPattern(pattern: string): boolean {
     return pattern.includes('*') || pattern.includes('?') || pattern.includes('[');
-  }
-
-  public orderFiles(directory: Directory): Directory {
-    const result = new Directory(directory.name, directory.path);
-    const groups: Map<string, Group> = new Map();
-    const ungrouped: FileSystemItem[] = [];
-
-    for (const file of directory.children) {
-      const rule = this.findMatchingRule(file);
-
-      if (rule) {
-        if (rule.allowIf && !rule.allowIf.test(file.name)) {
-            continue;
-        }
-        if (rule.isHidden) {
-          continue;
-        }
-
-        if (rule.groupName) {
-          if (!groups.has(rule.groupName)) {
-            groups.set(rule.groupName, new Group(rule.groupName));
-          }
-          groups.get(rule.groupName)!.children.push(file);
-        } else if (rule.groupBy) {
-          const groupKey = this.getGroupKey(file as File, rule.groupBy);
-          if (!groups.has(groupKey)) {
-            groups.set(groupKey, new Group(groupKey));
-          }
-          groups.get(groupKey)!.children.push(file);
-        } else {
-          ungrouped.push(file);
-        }
-      } else {
-        ungrouped.push(file);
-      }
-    }
-
-    const sortedGroupKeys = Array.from(groups.keys()).sort();
-    for (const groupKey of sortedGroupKeys) {
-      const group = groups.get(groupKey)!;
-      const orderedGroup = this.orderFileGroup(group.children);
-      result.children.push(new Group(groupKey, orderedGroup));
-    }
-
-    result.children.push(...this.orderFileGroup(ungrouped));
-
-    return result;
-  }
-
-  private findMatchingRule(file: FileSystemItem): OrderRule | null {
-    const filePath = file instanceof File ? this.path.relative('/', file.path) : file.name;
-
-    for (const rule of this.rules) {
-      if (typeof rule.pattern === 'string') {
-        if (minimatch(filePath, rule.pattern, { matchBase: true })) {
-          return rule;
-        }
-      } else if (rule.pattern instanceof RegExp) {
-        if (rule.pattern.test(filePath)) {
-          return rule;
-        }
-      }
-    }
-
-    return null;
   }
 
   private getGroupKey(file: File, groupBy: string | RegExp): string {
@@ -211,32 +373,9 @@ export class FileOrderProcessor {
         if (match && match[1]) {
             return match[1];
         }
-        return ''; // Default group for non-matching files
+        return '';
     }
     return '';
-  }
-
-  private orderFileGroup(files: FileSystemItem[]): FileSystemItem[] {
-    const explicitFiles: FileSystemItem[] = [];
-    const implicitFiles: FileSystemItem[] = [];
-    const explicitOrderMap = new Map<FileSystemItem, number>();
-
-    for (const file of files) {
-      const explicitIndex = this.explicitOrder.indexOf(file.name);
-      if (explicitIndex !== -1) {
-        explicitOrderMap.set(file, explicitIndex);
-        explicitFiles.push(file);
-      } else {
-        implicitFiles.push(file);
-      }
-    }
-
-    explicitFiles.sort((a, b) => (explicitOrderMap.get(a) ?? 0) - (explicitOrderMap.get(b) ?? 0));
-
-    const tiebreakers = this.globalTiebreakers;
-    const sortedImplicit = this.applyTiebreakers(implicitFiles, tiebreakers);
-
-    return [...explicitFiles, ...sortedImplicit];
   }
 
   private applyTiebreakers(files: FileSystemItem[], tiebreakers: string[]): FileSystemItem[] {
@@ -293,7 +432,7 @@ export class FileOrderProcessor {
         if (result !== 0) return result;
       }
 
-      return a.name.localeCompare(b.name);
+      return 0; 
     });
   }
 
@@ -321,29 +460,52 @@ export class FileOrderProcessor {
     return a.length - b.length;
   }
 
-  public getRequiredFiles(): string[] {
-    return this.rules
-      .filter(rule => rule.isRequired)
-      .map(rule => typeof rule.pattern === 'string' ? rule.pattern : rule.pattern.source);
-  }
-
   public validateRequiredFiles(directory: Directory): string[] {
-    const requiredFiles = this.getRequiredFiles();
-    const existingFiles = directory.children.map(f => f.name);
-    
-    return requiredFiles.filter(requiredPattern => {
-        return !existingFiles.some(existingFile => minimatch(existingFile, requiredPattern, { matchBase: true }));
-    });
-  }
-}
+    const missingFiles: string[] = [];
+    const requiredPatterns = this.getRequiredFilesFromStatements(this.orderFile.statements);
 
-export interface OrderRule {
-  pattern: string | RegExp;
-  directives: Directive[];
-  isRequired?: boolean;
-  tiebreakers?: string[];
-  groupBy?: string | RegExp;
-  groupName?: string;
-  isHidden?: boolean;
-  allowIf?: RegExp;
+    for (const pattern of requiredPatterns) {
+      let found = false;
+      const searchDirectory = (dir: Directory) => {
+        for (const item of dir.children) {
+          if (item instanceof File) {
+            const filePath = this.path.relative('/', item.path);
+            if (minimatch(filePath, pattern, { matchBase: true })) {
+              found = true;
+              break;
+            }
+          } else if (item instanceof Directory) {
+            searchDirectory(item);
+            if (found) break;
+          }
+        }
+      };
+      searchDirectory(directory);
+
+      if (!found) {
+        missingFiles.push(pattern.toString());
+      }
+    }
+    return missingFiles;
+  }
+
+  private getRequiredFilesFromStatements(statements: Statement[]): string[] {
+      const requiredPatterns: string[] = [];
+      for (const statement of statements) {
+          if (statement.type === 'filePattern') {
+              for (const directive of statement.directives || []) {
+                  if (directive.name === 'required') {
+                      if (statement.pattern) {
+                          requiredPatterns.push(statement.pattern);
+                      }
+                  }
+              }
+          } else if (statement.type === 'pathBlock' && statement.block) {
+              requiredPatterns.push(...this.getRequiredFilesFromStatements(statement.block));
+          } else if (statement.type === 'groupBlock' && statement.block) {
+              requiredPatterns.push(...this.getRequiredFilesFromStatements(statement.block));
+          }
+      }
+      return requiredPatterns;
+  }
 }
