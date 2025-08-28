@@ -187,6 +187,7 @@ class OrderParser extends CstParser {
 
         this.pattern = this.RULE("pattern", () => {
             this.OR([
+                { ALT: () => this.CONSUME(StringLiteral) },
                 { ALT: () => this.CONSUME(RegexLiteral) },
                 { ALT: () => this.CONSUME(Identifier) },
             ]);
@@ -346,7 +347,10 @@ export class OrderFileInterpreter {
     }
 
     visitPattern(cstNode: CstNode): string {
-        if (cstNode.children.RegexLiteral) {
+        if (cstNode.children.StringLiteral) {
+            const token = cstNode.children.StringLiteral[0] as IToken;
+            return token.image.slice(1, -1); // Remove quotes
+        } else if (cstNode.children.RegexLiteral) {
             const token = cstNode.children.RegexLiteral[0] as IToken;
             return token.image;
         } else if (cstNode.children.Identifier) {

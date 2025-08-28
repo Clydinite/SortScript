@@ -400,6 +400,7 @@ describe("FileOrderProcessor (Unit Tests)", () => {
 
     it("should group files by a named group block", () => {
         const orderFileContent = `
+            @type(@groups, @files)
             @group("JS Files") {
                 a.js
                 b.js
@@ -455,7 +456,8 @@ describe("FileOrderProcessor (Unit Tests)", () => {
 
     it("should group files by regex capture group, and name the group by the captured value", () => {
         const orderFileContent = `
-            *.js @group_by(/^(.*)\.(cpp|h)$/)
+            @type(@groups, @files)
+            * @group_by(/^(.*)\.(?:cpp|h)$/)
         `;
         const orderFile = parseOrderFile(orderFileContent);
         const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
@@ -958,6 +960,139 @@ describe("FileOrderProcessor (Unit Tests)", () => {
                 new File("b.ts"),
                 new File("c.ts"),
             ]),
+        ]);
+
+        assertFileSystem(sortedDir, expectedDir);
+    });
+
+    it("should sort files and folders based on @type directive", () => {
+        const orderFileContent = `
+            @type(@files, @folders)
+        `;
+        const orderFile = parseOrderFile(orderFileContent);
+        const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
+
+        const rootDir = createRoot([
+            new Directory("folder-a"),
+            new File("file-a.txt"),
+            new Directory("folder-b"),
+            new File("file-b.txt"),
+        ]);
+
+        const sortedDir = processor.orderFiles(rootDir);
+
+        const expectedDir = createRoot([
+            new File("file-a.txt"),
+            new File("file-b.txt"),
+            new Directory("folder-a"),
+            new Directory("folder-b"),
+        ]);
+
+        assertFileSystem(sortedDir, expectedDir);
+    });
+
+    it("should handle @folders and @files as patterns", () => {
+        const orderFileContent = `
+            @files
+            @folders
+        `;
+        const orderFile = parseOrderFile(orderFileContent);
+        const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
+
+        const rootDir = createRoot([
+            new Directory("folder-a"),
+            new File("file-a.txt"),
+            new Directory("folder-b"),
+            new File("file-b.txt"),
+        ]);
+
+        const sortedDir = processor.orderFiles(rootDir);
+
+        const expectedDir = createRoot([
+            new File("file-a.txt"),
+            new File("file-b.txt"),
+            new Directory("folder-a"),
+            new Directory("folder-b"),
+        ]);
+
+        assertFileSystem(sortedDir, expectedDir);
+    });
+
+    it("should sort folders alphabetically", () => {
+        const orderFileContent = `
+            @tiebreaker(@alphabetical)
+        `;
+        const orderFile = parseOrderFile(orderFileContent);
+        const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
+
+        const rootDir = createRoot([
+            new Directory("folder-c"),
+            new Directory("folder-a"),
+            new Directory("folder-b"),
+        ]);
+
+        const sortedDir = processor.orderFiles(rootDir);
+
+        const expectedDir = createRoot([
+            new Directory("folder-a"),
+            new Directory("folder-b"),
+            new Directory("folder-c"),
+        ]);
+
+        assertFileSystem(sortedDir, expectedDir);
+    });
+
+    it("should sort groups, files and folders based on @type directive", () => {
+        const orderFileContent = `
+            @type(@groups, @files, @folders)
+            @group("my-group") {
+                file-in-group.txt
+            }
+        `;
+        const orderFile = parseOrderFile(orderFileContent);
+        const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
+
+        const rootDir = createRoot([
+            new Directory("folder-a"),
+            new File("file-a.txt"),
+            new File("file-in-group.txt"),
+        ]);
+
+        const sortedDir = processor.orderFiles(rootDir);
+
+        const expectedDir = createRoot([
+            new Group("my-group", [new File("file-in-group.txt")]),
+            new File("file-a.txt"),
+            new Directory("folder-a"),
+        ]);
+
+        assertFileSystem(sortedDir, expectedDir);
+    });
+
+    it("should handle path block with glob pattern", () => {
+        const orderFileContent = `
+            *.md @tiebreaker(@alphabetical) {
+                c.md
+                a.md
+            }
+        `;
+        const orderFile = parseOrderFile(orderFileContent);
+        const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
+
+        const rootDir = createRoot([
+            new File("b.md"),
+            new File("c.md"),
+            new File("a.md"),
+            new File("d.txt"),
+        ]);
+
+        const sortedDir = processor.orderFiles(rootDir);
+
+        const expectedDir = createRoot([
+            new File("c.md"),
+            new File("a.md"),
+            new File("b.md"),
+            new File("d.txt"),
         ]);
 
         assertFileSystem(sortedDir, expectedDir);

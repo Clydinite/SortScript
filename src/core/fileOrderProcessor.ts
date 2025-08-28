@@ -34,6 +34,7 @@ interface ProcessStatementsResult {
   rules: Rule[];
   tiebreakers: string[];
   explicitOrder: string[];
+  typeOrder: string[];
 }
 
 export class FileOrderProcessor {
@@ -52,7 +53,7 @@ export class FileOrderProcessor {
     const result = new Directory(directory.name, []);
     const children = [...directory.children];
 
-    const { rules, tiebreakers, explicitOrder } = this.processStatements(statements, basePath);
+    const { rules, tiebreakers, explicitOrder, typeOrder } = this.processStatements(statements, basePath);
 
     const groupBlocks = statements.filter(s => s.type === 'groupBlock');
     const groups: Group[] = [];
@@ -98,7 +99,8 @@ export class FileOrderProcessor {
     const { orderedChildren: ruleOrderedItems, remainingChildren: finalRemainingItems } = this.applyRulesToChildren(
       remainingItems,
       rules,
-      tiebreakers
+      tiebreakers,
+      typeOrder
     );
 
     // Process subdirectories recursively
@@ -126,7 +128,7 @@ export class FileOrderProcessor {
     }
     
     // Final sort of the directory content
-    result.children = this.applyTiebreakers(result.children, tiebreakers);
+    result.children = this.applyTiebreakers(result.children, tiebreakers, typeOrder);
 
     // Re-apply explicit order at the end to ensure it is respected
     const finalExplicitlyOrdered: FileSystemItem[] = [];
@@ -167,14 +169,24 @@ export class FileOrderProcessor {
     const rules: Rule[] = [];
     let tiebreakers: string[] = [];
     const explicitOrder: string[] = [];
+    let typeOrder: string[] = [];
 
     for (const statement of statements) {
         if (statement.type === 'filePattern') {
-            if (!this.isGlobPattern(statement.pattern || '') && !statement.directives?.length) {
-                explicitOrder.push(statement.pattern || '');
+            const pattern = statement.pattern || '';
+            if (pattern === '@folders') {
+                if (typeOrder.indexOf('folders') === -1) typeOrder.push('folders');
+                continue;
+            }
+            if (pattern === '@groups') {
+                if (typeOrder.indexOf('groups') === -1) typeOrder.push('groups');
+                continue;
+            }
+            if (!this.isGlobPattern(pattern) && !statement.directives?.length) {
+                explicitOrder.push(pattern);
             }
             const rule: any = {
-              pattern: this.createPattern(statement.pattern || '', basePath),
+              pattern: this.createPattern(pattern, basePath),
               directives: statement.directives || []
             };
             for (const directive of statement.directives || []) {
@@ -230,12 +242,18 @@ export class FileOrderProcessor {
             if (statement.directive?.name === 'tiebreaker') {
                 tiebreakers = this.parseTiebreakers(statement.directive.args || []);
             }
+            if (statement.directive?.name === 'type') {
+                typeOrder = this.parseTiebreakers(statement.directive.args || []);
+            }
         } else if (statement.type === 'pathBlock') {
             if (statement.pattern === '') { // @root block
                 const rootBlockScope = this.processStatements(statement.block || [], basePath);
                 tiebreakers.push(...rootBlockScope.tiebreakers);
                 rules.push(...rootBlockScope.rules);
                 explicitOrder.push(...rootBlockScope.explicitOrder);
+                if (rootBlockScope.typeOrder.length > 0) {
+                    typeOrder = rootBlockScope.typeOrder;
+                }
             } else {
                 // For path blocks, rules are handled when processing the directory
             }
@@ -256,13 +274,14 @@ export class FileOrderProcessor {
         tiebreakers.push('alphabetical');
     }
 
-    return { rules, tiebreakers, explicitOrder };
+    return { rules, tiebreakers, explicitOrder, typeOrder };
   }
 
   private applyRulesToChildren(
     children: FileSystemItem[],
     rules: Rule[],
-    incomingTiebreakers: string[]
+    incomingTiebreakers: string[],
+    typeOrder: string[]
   ): { orderedChildren: FileSystemItem[], remainingChildren: FileSystemItem[] } {
     let orderedChildren: FileSystemItem[] = [];
     let remainingChildren: FileSystemItem[] = [...children];
@@ -323,12 +342,12 @@ export class FileOrderProcessor {
     const sortedGroupKeys = Array.from(groups.keys()).sort();
     for (const key of sortedGroupKeys) {
         const group = groups.get(key)!;
-        group.children = this.applyTiebreakers(group.children, incomingTiebreakers);
+        group.children = this.applyTiebreakers(group.children, incomingTiebreakers, typeOrder);
         groupItems.push(group);
     }
 
     orderedChildren.push(...groupItems);
-    orderedChildren = this.applyTiebreakers(orderedChildren, incomingTiebreakers);
+    orderedChildren = this.applyTiebreakers(orderedChildren, incomingTiebreakers, typeOrder);
     
     return { orderedChildren, remainingChildren };
   }
@@ -378,20 +397,20 @@ export class FileOrderProcessor {
     return '';
   }
 
-  private applyTiebreakers(files: FileSystemItem[], tiebreakers: string[]): FileSystemItem[] {
+  private applyTiebreakers(files: FileSystemItem[], tiebreakers: string[], typeOrder: string[]): FileSystemItem[] {
     return files.sort((a, b) => {
-      const aIsGroup = a instanceof Group;
-      const bIsGroup = b instanceof Group;
-      const aIsDir = a instanceof Directory;
-      const bIsDir = b instanceof Directory;
+      if (typeOrder && typeOrder.length > 0) {
+        const aType = a instanceof Group ? 'groups' : a instanceof Directory ? 'folders' : 'files';
+        const bType = b instanceof Group ? 'groups' : b instanceof Directory ? 'folders' : 'files';
+        const aIndex = typeOrder.indexOf(aType);
+        const bIndex = typeOrder.indexOf(bType);
 
-      // Directories first
-      if (aIsDir && !bIsDir) return -1;
-      if (!aIsDir && bIsDir) return 1;
-
-      // Groups after directories
-      if (aIsGroup && !bIsGroup) return -1;
-      if (!aIsGroup && bIsGroup) return 1;
+        if (aIndex !== -1 && bIndex !== -1) {
+          if (aIndex !== bIndex) {
+            return aIndex - bIndex;
+          }
+        }
+      }
 
       // Apply tiebreakers for items of the same type or files
       for (const tiebreaker of tiebreakers) {
