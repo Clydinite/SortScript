@@ -523,26 +523,22 @@ describe("FileOrderProcessor (Unit Tests)", () => {
         const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
 
         const rootDir = createRoot([
-            new Directory("docs", [
-                new File("error_codes.md"),
-                new File("faq.md"),
-                new File("setup_tutorial.md"),
-                new File("b.md"),
-                new File("a.md"),
-                new File("image.png"),
-            ]),
+            new File("error_codes.md"),
+            new File("faq.md"),
+            new File("setup_tutorial.md"),
+            new File("b.md"),
+            new File("a.md"),
+            new File("image.png"),
         ]);
 
         const sortedDir = processor.orderFiles(rootDir);
         const expectedDir = createRoot([
-            new Directory("docs", [
-                new File("setup_tutorial.md"),
-                new File("faq.md"),
-                new File("error_codes.md"),
-                new File("a.md"),
-                new File("b.md"),
-                new File("image.png"),
-            ]),
+            new File("setup_tutorial.md"),
+            new File("faq.md"),
+            new File("error_codes.md"),
+            new File("a.md"),
+            new File("b.md"),
+            new File("image.png"),
         ]);
 
         assertFileSystem(sortedDir, expectedDir);
@@ -740,7 +736,7 @@ describe("FileOrderProcessor (Unit Tests)", () => {
         const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
 
         const rootDir = createRoot([
-            new Directory("junk_drawer", [
+            new Directory("finances", [
                 new File("2020_finance_report.docs"),
                 new File("2021_finance_report.docs"),
                 new File("2022_finance_report.docs"),
@@ -749,7 +745,7 @@ describe("FileOrderProcessor (Unit Tests)", () => {
 
         const sortedDir = processor.orderFiles(rootDir);
         const expectedDir = createRoot([
-            new Directory("junk_drawer", [
+            new Directory("finances", [
                 new File("2022_finance_report.docs"),
                 new File("2021_finance_report.docs"),
                 new File("2020_finance_report.docs"),
@@ -1097,4 +1093,42 @@ describe("FileOrderProcessor (Unit Tests)", () => {
 
         assertFileSystem(sortedDir, expectedDir);
     });
+
+it("should handle explicit ordering and tiebreakers without a glob pattern rule", () => {
+    const orderFileContent = `
+        docs/ {
+            setup_tutorial.md
+            faq.md
+            error_codes.md
+            *.md @tiebreaker(@alphabetical)
+        }
+    `;
+    const orderFile = parseOrderFile(orderFileContent);
+    const processor = new FileOrderProcessor(orderFile!, mockPath, mockFs);
+
+    const rootDir = createRoot([
+        new Directory("docs", [
+            new File("error_codes.md"),
+            new File("faq.md"),
+            new File("setup_tutorial.md"),
+            new File("b.md"),
+            new File("a.md"),
+            new File("image.png"),
+        ]),
+    ]);
+
+    const sortedDir = processor.orderFiles(rootDir);
+    const expectedDir = createRoot([
+        new Directory("docs", [
+            new File("setup_tutorial.md"),
+            new File("faq.md"),
+            new File("error_codes.md"),
+            new File("a.md"),
+            new File("b.md"),
+            new File("image.png"),
+        ]),
+    ]);
+
+    assertFileSystem(sortedDir, expectedDir);
+});
 });
