@@ -1,10 +1,18 @@
 {
-  "checkpointing": { "enabled": true },
-  "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
-    }
-  },
-  "preferredEditor": "vscode"
+    "checkpointing": { "enabled": true },
+    "mcpServers": {
+        "context7": {
+            "command": "npx",
+            "args": ["-y", "@upstash/context7-mcp"]
+        },
+        "github": {
+            "httpUrl": "https://api.githubcopilot.com/mcp/",
+            "headers": {
+                "Authorization": "${GITHUB_PAT}"
+            },
+            "timeout": 5000
+        }
+    },
+
+    "preferredEditor": "vscode"
 }
