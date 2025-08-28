@@ -15,7 +15,7 @@
         },
         {
             "name": "keyword.control.directive.order",
-            "match": "@(required|allowif|disallowif|tiebreaker|groupby|metadata|alphabetical|reverse_alphabetical|natural|extension|size|modified|created|enum|default)\\b"
+            "match": "@(required|allow_if|disallow_if|tiebreaker|group_by|alphabetical|reverse_alphabetical|natural|extension|size|modified|created|default)\\b"
         },
         {
             "name": "keyword.control.directive.custom.order",
