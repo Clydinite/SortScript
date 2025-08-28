@@ -45,6 +45,7 @@ export class FileOrderProcessor {
     }
 
     private processDirectory(directory: Directory, statements: Statement[], basePath = ""): Directory {
+        console.log(`processDirectory: ${basePath}`);
         const result = new Directory(directory.name, []);
         const children = [...directory.children];
 
@@ -53,6 +54,10 @@ export class FileOrderProcessor {
 
         const processedChildren = new Set<FileSystemItem>();
         const orderedChildren: FileSystemItem[] = [];
+
+        const { tiebreakers: currentTiebreakers } = this.processStatements(remainingStatements, basePath);
+        console.log(`processDirectory: currentTiebreakers: ${currentTiebreakers}`);
+
 
         for (const block of pathBlocks) {
             const blockPattern = this.createPattern(block.pattern || "", basePath);
@@ -79,12 +84,13 @@ export class FileOrderProcessor {
                         blockTiebreakers = this.parseTiebreakers(directive.args || []);
                     }
                 }
+                console.log(`processDirectory: blockTiebreakers: ${blockTiebreakers}`);
 
                 const sortedBlockChildren = this.processChildren(
                     matchingChildren,
                     blockStatements,
                     basePath,
-                    blockTiebreakers
+                    blockTiebreakers || currentTiebreakers
                 );
                 orderedChildren.push(...sortedBlockChildren);
                 matchingChildren.forEach((c) => processedChildren.add(c));
@@ -92,7 +98,7 @@ export class FileOrderProcessor {
         }
 
         const remainingChildren = children.filter((c) => !processedChildren.has(c));
-        const sortedRemainingChildren = this.processChildren(remainingChildren, remainingStatements, basePath);
+        const sortedRemainingChildren = this.processChildren(remainingChildren, remainingStatements, basePath, currentTiebreakers);
         orderedChildren.push(...sortedRemainingChildren);
 
         // Process subdirectories recursively
@@ -108,7 +114,7 @@ export class FileOrderProcessor {
                     );
                     result.children.push(sortedSubDirectory);
                 } else {
-                    result.children.push(this.processDirectory(item, [], this.path.join(basePath, item.name)));
+                    result.children.push(this.processDirectory(item, [], this.path.join(basePath, item.name), currentTiebreakers));
                 }
             } else {
                 result.children.push(item);
@@ -124,8 +130,10 @@ export class FileOrderProcessor {
         basePath: string,
         incomingTiebreakers?: string[]
     ): FileSystemItem[] {
+        console.log(`processChildren: incomingTiebreakers: ${incomingTiebreakers}`);
         const { rules, tiebreakers, explicitOrder, typeOrder } = this.processStatements(statements, basePath);
         const finalTiebreakers = incomingTiebreakers || tiebreakers;
+        console.log(`processChildren: finalTiebreakers: ${finalTiebreakers}`);
 
         const groupBlocks = statements.filter((s) => s.type === "groupBlock");
         const groups: Group[] = [];
