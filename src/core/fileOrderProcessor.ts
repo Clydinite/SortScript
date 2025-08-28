@@ -48,9 +48,9 @@ export class FileOrderProcessor {
     return result;
   }
 
-  private processDirectory(directory: Directory, statements: Statement[], basePath: string = ''): Directory {
+  private processDirectory(directory: Directory, statements: Statement[], basePath = ''): Directory {
     const result = new Directory(directory.name, []);
-    let children = [...directory.children];
+    const children = [...directory.children];
 
     const { rules, tiebreakers, explicitOrder } = this.processStatements(statements, basePath);
 
@@ -106,7 +106,7 @@ export class FileOrderProcessor {
     const finalChildren = [...explicitlyOrderedItems, ...ruleOrderedItems, ...finalRemainingItems];
     for (const item of finalChildren) {
       if (item instanceof Directory) {
-        const pathBlock = this.findMatchingPathBlock(item.name, statements);
+        const pathBlock = this.findMatchingPathBlock(this.path.join(basePath, item.name), statements);
         if (pathBlock) {
           const subDirectoryStatements = pathBlock.block || [];
           const sortedSubDirectory = this.processDirectory(item, subDirectoryStatements, this.path.join(basePath, item.name));
@@ -380,12 +380,20 @@ export class FileOrderProcessor {
 
   private applyTiebreakers(files: FileSystemItem[], tiebreakers: string[]): FileSystemItem[] {
     return files.sort((a, b) => {
+      const aIsGroup = a instanceof Group;
+      const bIsGroup = b instanceof Group;
       const aIsDir = a instanceof Directory;
       const bIsDir = b instanceof Directory;
 
+      // Directories first
       if (aIsDir && !bIsDir) return -1;
       if (!aIsDir && bIsDir) return 1;
 
+      // Groups after directories
+      if (aIsGroup && !bIsGroup) return -1;
+      if (!aIsGroup && bIsGroup) return 1;
+
+      // Apply tiebreakers for items of the same type or files
       for (const tiebreaker of tiebreakers) {
         let result = 0;
         switch (tiebreaker) {

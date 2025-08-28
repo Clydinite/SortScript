@@ -4,7 +4,7 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug Current Test File",
+      "name": "Debug Vitest Current File",
       "autoAttachChildProcesses": true,
       "skipFiles": [
         "<node_internals>/**",
@@ -16,7 +16,13 @@
         "${relativeFile}"
       ],
       "smartStep": true,
-      "console": "integratedTerminal"
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      // --- THE CRITICAL CHANGE IS HERE ---
+      // We need to pass --inspect-brk to the Node.js runtime,
+      // not as an argument to Vitest itself.
+      "runtimeArgs": ["--inspect-brk"], // This tells Node.js to start in debug mode and break at the first line
+      "port": 9229 // Default Node.js debugger port
     }
   ]
 }

@@ -1,0 +1,1 @@
+what about wrapping it like this: @tiebreaker(@type(@folders, @files), @alphabetical)? and have @folders, when standalone, matches all folders (instead of */, but they can use it if they want), and of course groups and files (instead of /*) 
